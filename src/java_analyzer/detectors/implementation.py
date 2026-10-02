@@ -5,9 +5,11 @@ Identifies implementation-level code smells and complexity issues
 
 from typing import List, Dict, Any
 import javalang
-from detectors.base import CodeSmell
+from detectors.base import CodeSmell, register_detector
 
 
+@register_detector(name="implementation", category="Implementation",
+                   order=20, config_key="implementation")
 class ImplementationSmells(CodeSmell):
     """
     Detects implementation-level code smells including:
@@ -19,7 +21,8 @@ class ImplementationSmells(CodeSmell):
     - Deep Nesting
     """
     
-    def detect(self, tree: javalang.tree.CompilationUnit, lines: List[str]) -> List[Dict[str, Any]]:
+    def detect(self, tree: javalang.tree.CompilationUnit, lines: List[str],
+               ctx=None) -> List[Dict[str, Any]]:
         """Detect all implementation smells in the given AST."""
         results = []
         
@@ -44,7 +47,8 @@ class ImplementationSmells(CodeSmell):
                 node.name,
                 "High",
                 f"Cyclomatic complexity: {complexity}",
-                "Implementation"
+                "Implementation",
+                node=node
             ))
         return results
     
@@ -58,7 +62,8 @@ class ImplementationSmells(CodeSmell):
                 node.name,
                 "Medium",
                 f"Method body contains {len(node.body)} statements",
-                "Implementation"
+                "Implementation",
+                node=node
             ))
         return results
     
@@ -72,7 +77,8 @@ class ImplementationSmells(CodeSmell):
                 node.name,
                 "Low",
                 f"{len(node.parameters)} parameters",
-                "Implementation"
+                "Implementation",
+                node=node
             ))
         return results
     
@@ -87,7 +93,8 @@ class ImplementationSmells(CodeSmell):
                     node.name,
                     "Critical",
                     "Exception swallowed without logs or logic",
-                    "Implementation"
+                    "Implementation",
+                    node=catch if getattr(catch, "position", None) else None
                 ))
         return results
     
@@ -102,7 +109,8 @@ class ImplementationSmells(CodeSmell):
                 node.name,
                 "Low",
                 f"{magic_count} hard-coded numeric literals found",
-                "Implementation"
+                "Implementation",
+                node=node
             ))
         return results
     
@@ -117,7 +125,8 @@ class ImplementationSmells(CodeSmell):
                 node.name,
                 "Medium",
                 f"Maximum nesting depth: {max_depth}",
-                "Implementation"
+                "Implementation",
+                node=node
             ))
         return results
     

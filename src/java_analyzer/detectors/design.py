@@ -5,9 +5,11 @@ Identifies architectural and design-level code smells
 
 from typing import List, Dict, Any
 import javalang
-from detectors.base import CodeSmell
+from detectors.base import CodeSmell, register_detector
 
 
+@register_detector(name="design", category="Design", order=10,
+                   config_key="design")
 class DesignSmells(CodeSmell):
     """
     Detects design-level code smells including:
@@ -19,7 +21,8 @@ class DesignSmells(CodeSmell):
     - Abstract Without Abstracts
     """
     
-    def detect(self, tree: javalang.tree.CompilationUnit, lines: List[str]) -> List[Dict[str, Any]]:
+    def detect(self, tree: javalang.tree.CompilationUnit, lines: List[str],
+               ctx=None) -> List[Dict[str, Any]]:
         """Detect all design smells in the given AST."""
         results = []
         
@@ -42,7 +45,8 @@ class DesignSmells(CodeSmell):
                 node.name, 
                 "Medium", 
                 f"{len(node.implements)} interfaces implemented",
-                "Design"
+                "Design",
+                node=node
             ))
         return results
     
@@ -58,7 +62,8 @@ class DesignSmells(CodeSmell):
                 node.name,
                 "Critical",
                 f"{len(methods)} methods, {len(fields)} fields",
-                "Design"
+                "Design",
+                node=node
             ))
         return results
     
@@ -75,7 +80,8 @@ class DesignSmells(CodeSmell):
                     node.name,
                     "Low",
                     "No behavioral logic found",
-                    "Design"
+                    "Design",
+                    node=node
                 ))
         return results
     
@@ -93,7 +99,8 @@ class DesignSmells(CodeSmell):
                         f"{node.name}.{method.name}",
                         "Medium",
                         f"{external_calls} external method calls",
-                        "Design"
+                        "Design",
+                        node=method
                     ))
         return results
     
@@ -109,7 +116,8 @@ class DesignSmells(CodeSmell):
                 node.name,
                 "Low",
                 f"Minimal functionality: {len(methods)} methods, {len(fields)} fields",
-                "Design"
+                "Design",
+                node=node
             ))
         return results
     
@@ -126,6 +134,7 @@ class DesignSmells(CodeSmell):
                     node.name,
                     "Low",
                     "Abstract class with no abstract methods",
-                    "Design"
+                    "Design",
+                    node=node
                 ))
         return results

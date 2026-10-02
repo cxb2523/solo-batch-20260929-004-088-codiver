@@ -23,6 +23,19 @@ def render_executive_summary(df: pd.DataFrame, metrics: Dict[str, Any]):
     st.markdown("###  Executive Dashboard")
     
     col1, col2, col3, col4, col5 = st.columns(5)
+
+    if len(df) == 0:
+        with col1:
+            st.metric("Total Issues", 0)
+        with col2:
+            st.metric("Critical", 0)
+        with col3:
+            st.metric("High Priority", 0)
+        with col4:
+            st.metric("Risk Index", "0.00/4.00")
+        with col5:
+            st.metric("Quality Score", "100/100", delta="Pass")
+        return
     
     with col1:
         st.metric("Total Issues", len(df), 

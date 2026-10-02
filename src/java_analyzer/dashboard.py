@@ -11,6 +11,8 @@ import pandas as pd
 from datetime import datetime
 
 from analyzer_engine import StaticAnalyzerEngine
+from traceability import build_trace_views, pipeline_timeline
+from detectors.base import registry_snapshot
 from utils.ui_components import (
     render_executive_summary,
     render_code_metrics,
@@ -29,6 +31,10 @@ def initialize_session_state():
         st.session_state.analysis_results = None
     if 'analysis_metrics' not in st.session_state:
         st.session_state.analysis_metrics = None
+    if 'analysis_findings' not in st.session_state:
+        st.session_state.analysis_findings = None
+    if 'analysis_trace' not in st.session_state:
+        st.session_state.analysis_trace = None
     if 'source_code' not in st.session_state:
         st.session_state.source_code = None
     if 'file_name' not in st.session_state:
@@ -160,29 +166,30 @@ def handle_analysis(source_code: str, config: dict = None):
         source_code: Java source code to analyze
         config: Analysis configuration dictionary
     """
-    engine = StaticAnalyzerEngine(source_code, config)
-    
-    try:
-        with st.spinner(" Parsing AST nodes and executing analyzers..."):
-            results, tree = engine.run()
-            metrics = engine.calculate_metrics(tree)
-            
-            # Store results in session state
-            st.session_state.analysis_results = results
-            st.session_state.analysis_metrics = metrics
-            
-    except ValueError as ve:
-        st.error(f"❌ **Validation Error:** {ve}")
-        st.info(" [TIP]  Please ensure your Java file has valid syntax and try again.")
-    except Exception as e:
-        st.error(f"❌ **System Error:** {e}")
-        st.exception(e)
+    file_name = st.session_state.get("file_name") or "<memory>"
+    engine = StaticAnalyzerEngine(source_code, config, file_name=file_name)
+
+    with st.spinner(" Parsing AST nodes and executing analyzers..."):
+        # Traceable pipeline. A parse failure degrades to one error finding
+        # instead of interrupting, so the page always gets consistent data.
+        outcome = engine.run_traced(file_name)
+
+        st.session_state.analysis_results = outcome["findings"]
+        st.session_state.analysis_metrics = outcome["metrics"]
+        st.session_state.analysis_findings = outcome["findings"]
+        st.session_state.analysis_trace = outcome["trace"]
+
+        if outcome["status"] != "ok":
+            st.warning(
+                f"⚠️ **Parse issue in {file_name}:** recorded one error "
+                "entry; the rest of the batch remains unaffected."
+            )
 
 
 def display_analysis_results():
     """Display all analysis results from session state."""
     if st.session_state.analysis_results is not None:
-        results = st.session_state.analysis_results
+        results = st.session_state.analysis_findings or st.session_state.analysis_results
         metrics = st.session_state.analysis_metrics
         df = pd.DataFrame(results) if results else pd.DataFrame()
         
@@ -197,12 +204,109 @@ def display_analysis_results():
         st.markdown("---")
         
         render_detailed_findings(df)
+
+        st.markdown("---")
+
+        render_trace_page(
+            st.session_state.analysis_findings or results,
+            st.session_state.analysis_trace,
+        )
         
         # Source code viewer
         render_source_code_viewer(st.session_state.source_code)
         
         # Summary report
         render_summary_report(df, metrics, st.session_state.file_name)
+
+
+def render_trace_page(findings, trace):
+    """
+    Render the provenance / traceability page.
+
+    Every pipeline hit (read -> parse -> detector dispatch -> helper
+    decision -> aggregated finding) is replayable here. A granularity
+    toggle switches between per-file and per-rule/severity aggregation;
+    the two sides are built from the same de-duplicated finding list and
+    an alignment check confirms their counts match.
+    """
+    st.markdown("###  Finding Traceability")
+
+    if not findings:
+        st.success(" No findings to trace - clean analysis.")
+        return
+
+    views = build_trace_views(findings)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Unique Findings", views["total"])
+    with col2:
+        st.metric("By File Total", views["file_total"])
+    with col3:
+        st.metric("By Rule Total", views["rule_total"])
+
+    if views["aligned"]:
+        st.success(
+            f" Counts aligned: {views['file_total']} (by file) == "
+            f"{views['rule_total']} (by rule/severity) == {views['total']} "
+            "unique findings."
+        )
+    else:
+        st.error(
+            " Count mismatch between granularities - the unique key or "
+            "aggregation is inconsistent."
+        )
+
+    sev = views["severity"]
+    st.caption(
+        f"Critical {sev['Critical']} | High {sev['High']} | "
+        f"Medium {sev['Medium']} | Low {sev['Low']}"
+    )
+
+    granularity = st.radio(
+        "Aggregation granularity",
+        options=["By file", "By rule/severity"],
+        horizontal=True,
+    )
+
+    if granularity == "By file":
+        st.dataframe(pd.DataFrame(views["by_file"]),
+                     use_container_width=True, hide_index=True)
+    else:
+        st.dataframe(pd.DataFrame(views["by_rule"]),
+                     use_container_width=True, hide_index=True)
+
+    st.markdown("#### Pipeline replay")
+    if trace is not None:
+        st.caption(
+            f"File: {trace.get('file_name')} | "
+            f"content hash: {trace.get('content_hash')}"
+        )
+        timeline = pipeline_timeline(trace)
+        st.dataframe(pd.DataFrame(timeline)[
+            ["seq", "Layer", "Step", "Status", "Detail"]
+        ], use_container_width=True, hide_index=True, height=320)
+    else:
+        st.info("No per-file trace available for this run.")
+
+    with st.expander(" Detector registry (fixed dispatch order)"):
+        st.dataframe(pd.DataFrame(registry_snapshot()),
+                     use_container_width=True, hide_index=True)
+
+    with st.expander(" Provenance entries (one row per unique finding)"):
+        provenance = [{
+            "Key": item["Key"],
+            "File": item["File"],
+            "Detector": item["Detector"],
+            "RuleId": item["RuleId"],
+            "Type": item["Type"],
+            "Severity": item["Severity"],
+            "Target": item["Target"],
+            "Line": item["Line"],
+            "Reason": item["Reason"],
+        } for item in findings]
+        st.dataframe(pd.DataFrame(provenance),
+                     use_container_width=True, hide_index=True, height=320)
 
 
 def main():
@@ -228,6 +332,8 @@ def main():
             # Reset analysis when new file is uploaded
             st.session_state.analysis_results = None
             st.session_state.analysis_metrics = None
+            st.session_state.analysis_findings = None
+            st.session_state.analysis_trace = None
         
         # Display file information
         render_file_info(

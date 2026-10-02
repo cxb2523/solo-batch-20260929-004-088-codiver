@@ -3,8 +3,12 @@ Helper Functions
 Utility functions for naming validation, line counting, and other common tasks
 """
 
+import hashlib
 import re
 from typing import List
+
+
+SEVERITY_RANK = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
 
 
 def validate_class_name(name: str) -> bool:
@@ -123,3 +127,26 @@ def format_file_size(size_bytes: int) -> str:
             return f"{size_bytes:.1f} {unit}"
         size_bytes /= 1024.0
     return f"{size_bytes:.1f} TB"
+
+
+def stable_hash(parts: List[object]) -> str:
+    """
+    Build a deterministic short hash from an ordered list of key parts.
+
+    Used as the unique finding key: equal inputs always produce the same
+    key (so re-runs and registration-order changes cannot create duplicate
+    entries), different inputs produce different keys.
+
+    Args:
+        parts: Key components, e.g. file, detector, rule, target, line.
+
+    Returns:
+        16-character hexadecimal digest.
+    """
+    joined = "\u0001".join("" if part is None else str(part) for part in parts)
+    return hashlib.sha1(joined.encode("utf-8")).hexdigest()[:16]
+
+
+def severity_rank(severity: str) -> int:
+    """Sort rank for severity levels; unknown severities sort last."""
+    return SEVERITY_RANK.get(severity, len(SEVERITY_RANK))
