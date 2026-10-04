@@ -10,7 +10,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-from analyzer_engine import StaticAnalyzerEngine
+from analyzer_engine import StaticAnalyzerEngine, analyze_batch
 from utils.ui_components import (
     render_executive_summary,
     render_code_metrics,
@@ -18,7 +18,8 @@ from utils.ui_components import (
     render_detailed_findings,
     render_source_code_viewer,
     render_summary_report,
-    render_landing_page
+    render_landing_page,
+    render_traceability_page
 )
 from utils.helpers import format_file_size
 
@@ -33,6 +34,8 @@ def initialize_session_state():
         st.session_state.source_code = None
     if 'file_name' not in st.session_state:
         st.session_state.file_name = None
+    if 'trace_report' not in st.session_state:
+        st.session_state.trace_report = None
 
 
 def configure_page():
@@ -152,31 +155,46 @@ def render_file_info(file_name: str, file_size: int, line_count: int):
         st.info(f" **Lines:** {line_count}")
 
 
-def handle_analysis(source_code: str, config: dict = None):
+def handle_analysis(source_code: str, config: dict = None, file_name: str = None):
     """
     Handle the analysis execution and error handling.
     
     Args:
         source_code: Java source code to analyze
         config: Analysis configuration dictionary
+        file_name: Logical file name (defaults to session state)
     """
-    engine = StaticAnalyzerEngine(source_code, config)
-    
-    try:
-        with st.spinner(" Parsing AST nodes and executing analyzers..."):
-            results, tree = engine.run()
-            metrics = engine.calculate_metrics(tree)
-            
-            # Store results in session state
-            st.session_state.analysis_results = results
-            st.session_state.analysis_metrics = metrics
-            
-    except ValueError as ve:
-        st.error(f"❌ **Validation Error:** {ve}")
+    file_name = file_name or st.session_state.get('file_name') or 'uploaded.java'
+    report = handle_batch_analysis({file_name: source_code}, config)
+
+    if file_name in report.errors:
+        st.error(f"❌ **Validation Error:** {report.errors[file_name]}")
         st.info(" [TIP]  Please ensure your Java file has valid syntax and try again.")
-    except Exception as e:
-        st.error(f"❌ **System Error:** {e}")
-        st.exception(e)
+        st.session_state.analysis_results = None
+        st.session_state.analysis_metrics = None
+        return
+
+    st.session_state.analysis_results = [
+        issue for issue in report.issues if issue.get('File') == file_name
+    ]
+    st.session_state.analysis_metrics = report.metrics.get(file_name)
+
+
+def handle_batch_analysis(files: dict, config: dict = None):
+    """
+    Run the traced batch analysis over multiple files and store the report.
+
+    Args:
+        files: Mapping of file name to Java source code
+        config: Analysis configuration dictionary
+
+    Returns:
+        traceability.BatchReport for the whole batch
+    """
+    with st.spinner(" Parsing AST nodes and executing analyzers..."):
+        report = analyze_batch(files, config)
+    st.session_state.trace_report = report
+    return report
 
 
 def display_analysis_results():
@@ -203,6 +221,10 @@ def display_analysis_results():
         
         # Summary report
         render_summary_report(df, metrics, st.session_state.file_name)
+    
+    # Traceability page (pipeline replay + aligned granularity views)
+    if st.session_state.get('trace_report') is not None:
+        render_traceability_page(st.session_state.trace_report)
 
 
 def main():

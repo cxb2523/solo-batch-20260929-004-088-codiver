@@ -41,6 +41,7 @@ st.markdown("""
 from java_analyzer.dashboard import (
     initialize_session_state,
     handle_analysis as handle_java_analysis,
+    handle_batch_analysis as handle_java_batch,
     display_analysis_results as display_java_results,
     render_file_info as render_java_file_info
 )
@@ -240,8 +241,13 @@ def main():
                     else:
                         active_java_file = java_files[0]
 
-                    active_java_file.seek(0)
-                    source_code = active_java_file.getvalue().decode("utf-8")
+                    # Run the traced batch over ALL uploaded Java files so the
+                    # traceability page can aggregate per file.
+                    java_sources = {}
+                    for jf in java_files:
+                        jf.seek(0)
+                        java_sources[jf.name] = jf.read().decode("utf-8")
+                    source_code = java_sources[active_java_file.name]
                     
                     # Update session state for the Java Dashboard components
                     st.session_state.file_name = active_java_file.name
@@ -250,11 +256,21 @@ def main():
                     # Render basic file info
                     render_java_file_info(active_java_file.name, len(source_code), len(source_code.split('\n')))
                     
-                    # Run analysis with the selected CONFIGURATIONS (passing java_config to respect user choices)
-                    handle_java_analysis(source_code, java_config)
+                    # Run batch analysis with the selected CONFIGURATIONS
+                    batch_report = handle_java_batch(java_sources, java_config)
+                    active_name = active_java_file.name
+                    if active_name in batch_report.errors:
+                        st.error(f"❌ **Validation Error:** {batch_report.errors[active_name]}")
+                        st.session_state.analysis_results = None
+                        st.session_state.analysis_metrics = None
+                    else:
+                        st.session_state.analysis_results = [
+                            issue for issue in batch_report.issues
+                            if issue.get('File') == active_name
+                        ]
+                        st.session_state.analysis_metrics = batch_report.metrics.get(active_name)
                     
-                    if st.session_state.analysis_results is not None:
-                        display_java_results()
+                    display_java_results()
                 else:
                     st.info("Click 'Execute CoDiver Analysis' in the sidebar to run the AST Engine.")
             tab_idx += 1

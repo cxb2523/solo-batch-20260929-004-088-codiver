@@ -369,3 +369,95 @@ def render_landing_page():
         """)
     
     st.info(" Upload a Java file from the sidebar to start your comprehensive code analysis")
+
+
+def render_traceability_page(report):
+    """
+    Render the traceability (溯源) page: full pipeline replay plus the
+    two aligned granularity views (by file / by rule & severity).
+
+    Args:
+        report: traceability.BatchReport produced by analyze_batch
+    """
+    from analyzer_engine import parse_cache_stats
+
+    st.markdown("---")
+    st.markdown("###   Analysis Traceability · 溯源回放")
+
+    if report is None:
+        st.info("Run an analysis to populate the traceability view.")
+        return
+
+    # Alignment banner: both granularities must account for the same items
+    total = len(report.issues)
+    by_file = report.by_file()
+    by_rule = report.by_rule_severity()
+    aligned = report.counts_aligned()
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Unique Findings", total)
+    with col2:
+        st.metric("Files", len(by_file))
+    with col3:
+        st.metric("Rule/Severity Buckets", len(by_rule))
+    with col4:
+        st.metric("Parse Cache", f"{parse_cache_stats['hits']}H/{parse_cache_stats['misses']}M")
+
+    if aligned:
+        st.success(
+            f"✅ Counts aligned: by-file total = by-rule/severity total = {total}")
+    else:
+        st.error(
+            f"❌ Count mismatch: by-file={sum(by_file.values())}, "
+            f"by-rule/severity={sum(by_rule.values())}, total={total}")
+
+    if report.errors:
+        with st.expander(f"⚠️ Parse Errors ({len(report.errors)})", expanded=True):
+            for fname, message in report.errors.items():
+                st.error(f"**{fname}** — degraded to one error entry: {message}")
+
+    # Granularity toggle
+    granularity = st.radio(
+        "Granularity · 粒度",
+        ["By File · 按文件", "By Rule & Severity · 按规则/严重级"],
+        horizontal=True,
+        key="trace_granularity",
+    )
+
+    left, right = st.columns(2)
+    file_df = pd.DataFrame(
+        [{"File": name, "Issues": count} for name, count in by_file.items()])
+    rule_df = pd.DataFrame(
+        [{"Rule": rule, "Severity": sev, "Issues": count}
+         for (rule, sev), count in by_rule.items()])
+
+    if granularity.startswith("By File"):
+        with left:
+            st.markdown("**By File · 按文件**")
+            st.dataframe(file_df, use_container_width=True, hide_index=True)
+        with right:
+            st.markdown("**Cross-check · 按规则/严重级汇总**")
+            st.dataframe(rule_df, use_container_width=True, hide_index=True)
+    else:
+        with left:
+            st.markdown("**By Rule & Severity · 按规则/严重级**")
+            st.dataframe(rule_df, use_container_width=True, hide_index=True)
+        with right:
+            st.markdown("**Cross-check · 按文件汇总**")
+            st.dataframe(file_df, use_container_width=True, hide_index=True)
+
+    # Item-level alignment: file x rule/severity pivot with margins
+    if total > 0:
+        issues_df = pd.DataFrame(report.issues)
+        pivot = pd.pivot_table(
+            issues_df, index="File", columns=["Type", "Severity"],
+            values="Reason", aggfunc="count", fill_value=0, margins=True,
+            margins_name="Total")
+        with st.expander("  Item-level alignment matrix (File × Rule/Severity)"):
+            st.dataframe(pivot, use_container_width=True)
+
+    # Full pipeline replay
+    with st.expander("  Pipeline Trace · 链路回放", expanded=True):
+        trace_df = pd.DataFrame(report.trace_rows())
+        st.dataframe(trace_df, use_container_width=True, hide_index=True)

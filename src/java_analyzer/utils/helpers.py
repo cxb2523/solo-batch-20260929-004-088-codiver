@@ -6,6 +6,8 @@ Utility functions for naming validation, line counting, and other common tasks
 import re
 from typing import List
 
+from traceability import emit_helper
+
 
 def validate_class_name(name: str) -> bool:
     """
@@ -17,7 +19,9 @@ def validate_class_name(name: str) -> bool:
     Returns:
         True if valid, False otherwise
     """
-    return bool(re.match(r'^[A-Z][a-zA-Z0-9]*$', name))
+    valid = bool(re.match(r'^[A-Z][a-zA-Z0-9]*$', name))
+    emit_helper(f"validate_class_name('{name}') -> {valid}")
+    return valid
 
 
 def validate_method_name(name: str) -> bool:
@@ -30,7 +34,9 @@ def validate_method_name(name: str) -> bool:
     Returns:
         True if valid, False otherwise
     """
-    return bool(re.match(r'^[a-z][a-zA-Z0-9]*$', name))
+    valid = bool(re.match(r'^[a-z][a-zA-Z0-9]*$', name))
+    emit_helper(f"validate_method_name('{name}') -> {valid}")
+    return valid
 
 
 def count_blank_lines(lines: List[str]) -> int:

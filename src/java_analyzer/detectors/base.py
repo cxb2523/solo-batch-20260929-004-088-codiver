@@ -4,8 +4,55 @@ Defines the contract that all detector implementations must follow
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple, Type
 import javalang
+
+
+# Centralized detector registry.
+#
+# Decision: detectors are registered explicitly in one ordered list
+# (populated by analyzer_engine at import time) instead of decorator-based
+# auto-discovery. Auto-discovery depends on module import order, which is
+# fragile and hard to review; an explicit registry makes execution order a
+# testable constant.
+#
+# Registration order DOES determine the order of issues in the raw result
+# list (detectors run sequentially and issues are appended in order), but
+# it does NOT change deduplication results: dedup keys are content-based
+# (see traceability.issue_key), so the set of unique issues and every
+# per-file / per-rule count is order-invariant.
+DETECTOR_REGISTRY: List[Tuple[str, Type["CodeSmell"]]] = []
+
+
+def register_detector(config_key: str, detector_cls: Type["CodeSmell"]) -> None:
+    """
+    Register a detector class under its configuration key.
+
+    Args:
+        config_key: Key used in the analysis config dict (e.g. 'design')
+        detector_cls: CodeSmell subclass to instantiate when enabled
+
+    Raises:
+        ValueError: If the config key is already registered
+    """
+    if any(key == config_key for key, _ in DETECTOR_REGISTRY):
+        raise ValueError(f"Duplicate detector registration: {config_key}")
+    DETECTOR_REGISTRY.append((config_key, detector_cls))
+
+
+def build_detectors(config: Dict[str, bool] = None) -> List["CodeSmell"]:
+    """
+    Instantiate enabled detectors in registry order.
+
+    Args:
+        config: Dictionary mapping config keys to enabled flags.
+                Missing keys default to enabled.
+
+    Returns:
+        List of detector instances in deterministic registry order
+    """
+    config = config or {}
+    return [cls() for key, cls in DETECTOR_REGISTRY if config.get(key, True)]
 
 
 class CodeSmell(ABC):
